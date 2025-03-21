@@ -7,13 +7,12 @@ import os
 from sentence_transformers import SentenceTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import joblib
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import SMOTE
 import json
 import logging
-from typing import Tuple, Dict, List
 import sys
 from xgboost import XGBClassifier
 import umap
@@ -75,12 +74,18 @@ MODEL_CONFIGS = [
     {"model_type": "lr", "use_umap": True, "use_smote": False, "use_class_weights": True},
     {"model_type": "lr", "use_umap": True, "use_smote": True, "use_class_weights": True},
 
-    # Without UMAP
+    # Without UMAP - All combinations
     {"model_type": "rf", "use_umap": False, "use_smote": False, "use_class_weights": False},
+    {"model_type": "rf", "use_umap": False, "use_smote": True, "use_class_weights": False},
+    {"model_type": "rf", "use_umap": False, "use_smote": False, "use_class_weights": True},
     {"model_type": "rf", "use_umap": False, "use_smote": True, "use_class_weights": True},
     {"model_type": "xgb", "use_umap": False, "use_smote": False, "use_class_weights": False},
+    {"model_type": "xgb", "use_umap": False, "use_smote": True, "use_class_weights": False},
+    {"model_type": "xgb", "use_umap": False, "use_smote": False, "use_class_weights": True},
     {"model_type": "xgb", "use_umap": False, "use_smote": True, "use_class_weights": True},
     {"model_type": "lr", "use_umap": False, "use_smote": False, "use_class_weights": False},
+    {"model_type": "lr", "use_umap": False, "use_smote": True, "use_class_weights": False},
+    {"model_type": "lr", "use_umap": False, "use_smote": False, "use_class_weights": True},
     {"model_type": "lr", "use_umap": False, "use_smote": True, "use_class_weights": True},
 ]
 
@@ -365,6 +370,114 @@ def aggregate_predictions_by_domain(domains, y_true, y_pred, targets_df):
     return pd.DataFrame(domain_results)
 
 
+def rank_models_by_domain_confusion_matrices():
+    """
+    Rank model configurations based on how well they predict 'partner' and 'partner-seo' classes.
+    Focus on minimizing false negatives for these important classes.
+    Save results as a CSV file.
+    """
+    logging.info("Ranking models based on domain confusion matrices...")
+    
+    # Get all domain prediction CSV files
+    prediction_files = [f for f in os.listdir('results/output_predictions') if f.endswith('_domain.csv')]
+    
+    model_metrics = []
+    
+    for file in prediction_files:
+        # Extract model prefix from filename
+        prefix = file.replace('prediction_', '').replace('_domain.csv', '')
+        
+        # Load predictions
+        df = pd.read_csv(f'results/output_predictions/{file}')
+        
+        # Calculate metrics focused on partner and partner-seo classes
+        metrics = {}
+        
+        # Get true and predicted labels
+        y_true = df['true_category']
+        y_pred = df['predicted_category']
+        
+        # Create a confusion matrix for manual calculation
+        # This is more robust than using recall_score for multilabel cases
+        labels = sorted(set(list(y_true.unique()) + list(y_pred.unique())))
+        cm = confusion_matrix(y_true, y_pred, labels=labels)
+        cm_df = pd.DataFrame(cm, index=labels, columns=labels)
+        
+        # Calculate recall for 'partner' class: TP / (TP + FN)
+        try:
+            if 'partner' in cm_df.index:
+                # For partner class: true positives / all actual partners
+                partner_tp = cm_df.loc['partner', 'partner']
+                partner_total = cm_df.loc['partner'].sum()
+                partner_recall = partner_tp / partner_total if partner_total > 0 else 0
+                metrics['partner_recall'] = partner_recall
+                
+                # Log misclassifications for debugging
+                logging.info(f"{prefix} - Partner class: {partner_tp} correctly classified out of {partner_total} total")
+                if partner_total > 0 and partner_tp < partner_total:
+                    partner_errors = cm_df.loc['partner'].drop('partner')
+                    for idx, val in partner_errors.items():
+                        if val > 0:
+                            logging.info(f"  {val} 'partner' samples misclassified as '{idx}'")
+            else:
+                metrics['partner_recall'] = 0
+                logging.info(f"{prefix} - No 'partner' instances in test set")
+                
+            # Calculate recall for 'partner-seo' class
+            if 'partner-seo' in cm_df.index:
+                # For partner-seo class: true positives / all actual partner-seo
+                seo_tp = cm_df.loc['partner-seo', 'partner-seo']
+                seo_total = cm_df.loc['partner-seo'].sum()
+                seo_recall = seo_tp / seo_total if seo_total > 0 else 0
+                metrics['partner_seo_recall'] = seo_recall
+                
+                # Log misclassifications for debugging
+                logging.info(f"{prefix} - Partner-SEO class: {seo_tp} correctly classified out of {seo_total} total")
+                if seo_total > 0 and seo_tp < seo_total:
+                    seo_errors = cm_df.loc['partner-seo'].drop('partner-seo')
+                    for idx, val in seo_errors.items():
+                        if val > 0:
+                            logging.info(f"  {val} 'partner-seo' samples misclassified as '{idx}'")
+            else:
+                metrics['partner_seo_recall'] = 0
+                logging.info(f"{prefix} - No 'partner-seo' instances in test set")
+                
+        except Exception as e:
+            logging.warning(f"Error calculating metrics for {prefix}: {e}")
+            metrics['partner_recall'] = 0
+            metrics['partner_seo_recall'] = 0
+            
+        # Weighted combined score (prioritizing recall of important classes)
+        # Higher weight for partner class
+        weighted_score = (metrics.get('partner_recall', 0) * 0.7) + (metrics.get('partner_seo_recall', 0) * 0.3)
+        metrics['weighted_score'] = weighted_score
+        
+        # Overall accuracy for reference
+        metrics['overall_accuracy'] = accuracy_score(y_true, y_pred)
+        
+        # Add to results
+        model_metrics.append({
+            'model': prefix,
+            'partner_recall': metrics.get('partner_recall', 0),
+            'partner_seo_recall': metrics.get('partner_seo_recall', 0),
+            'weighted_score': metrics.get('weighted_score', 0),
+            'overall_accuracy': metrics.get('overall_accuracy', 0)
+        })
+    
+    # Create DataFrame and sort by weighted score (descending)
+    metrics_df = pd.DataFrame(model_metrics)
+    metrics_df = metrics_df.sort_values('weighted_score', ascending=False).reset_index(drop=True)
+    
+    # Save to CSV
+    metrics_df.to_csv('results/model_rankings.csv', index=False)
+    
+    # Log results
+    logging.info("Model rankings based on minimizing false negatives for partner classes:")
+    logging.info("\n" + metrics_df.to_string())
+    
+    return metrics_df
+
+
 def save_domain_confusion_matrix(domain_df, title, prefix):
     """Create and save confusion matrix for domain-level predictions"""
     y_true = domain_df['true_category']
@@ -635,6 +748,9 @@ def main():
                 targets_df=targets
             )
             classifiers[prefix] = clf
+        
+        # Rank models based on domain confusion matrices
+        rank_models_by_domain_confusion_matrices()
         
         # Save all artifacts
         logging.info("Saving models and artifacts...")
