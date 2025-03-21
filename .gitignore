@@ -1,0 +1,42 @@
+# Models directory
+models/
+models/*
+
+# Embeddings directory
+embeddings/
+embeddings/*
+
+# Data directory
+data/
+data/*
+
+# Virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# Results directory
+results/
+results/*
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE files
+.idea/
+.vscode/
+
+# OS specific files
+.DS_Store
+Thumbs.db 

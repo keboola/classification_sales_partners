@@ -1,0 +1,10 @@
+numpy
+pandas
+scikit-learn
+sentence-transformers
+imbalanced-learn
+seaborn
+matplotlib
+joblib
+xgboost
+umap-learn
