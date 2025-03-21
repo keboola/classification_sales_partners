@@ -19,6 +19,10 @@ env/
 # Results directory
 results/
 results/*
+results_logistic_regression/
+results_logistic_regression/*
+results_best/
+results_best/*
 
 # Python cache files
 __pycache__/
