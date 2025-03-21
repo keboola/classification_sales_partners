@@ -2,6 +2,32 @@
 
 This project provides scripts to train a model for classifying domains based on their descriptions, and then make predictions using the trained model. The scripts are specifically designed to work within the Keboola data platform.
 
+## Model Architecture
+
+### Best Model Overview
+
+The best-performing model in this project is a **Logistic Regression classifier** with the following characteristics:
+
+- **Embedding Model**: Sentence-BERT `all-MiniLM-L6-v2` for converting text descriptions into meaningful numeric vectors
+- **Class Weighting**: Employs balanced class weights to handle class imbalance in the training data
+- **Training Data**: Trained on the full dataset without train/test splitting for maximum data utilization
+- **Random Seed**: Uses a fixed random seed (42) for all random processes to ensure reproducibility
+
+### How the Model Works
+
+1. **Text Embedding**: Domain descriptions are transformed into 384-dimensional embeddings using Sentence-BERT
+2. **Classification**: A logistic regression model predicts the category for each domain description
+3. **Domain Aggregation**: URL-level predictions are aggregated to domain-level using a rule-based approach:
+   - If any URL for a domain is classified as 'partner', the entire domain is classified as 'partner'
+   - If any URL is classified as 'partner-seo' (and none are 'partner'), the domain is classified as 'partner-seo'
+   - Otherwise, the majority classification is used
+
+### Performance Considerations
+
+- The model prioritizes recall for the 'partner' and 'partner-seo' classes over overall accuracy
+- Class weights are applied to handle the imbalanced nature of the domain categories
+- The weighted score metric is calculated as: (0.7 × partner_recall) + (0.3 × partner_seo_recall)
+
 ## Scripts Overview
 
 There are two main scripts:
@@ -14,14 +40,12 @@ There are two main scripts:
 ### For Training (train_best_model_keboola.py)
 
 #### Input Tables:
-- `/data/in/tables/keyword-analysis-mapping.csv` - Contains domain mappings with the 'domain' and 'category' columns
-- `/data/in/tables/domains.csv` - Contains domains with the 'domain' and 'description' columns
+- `/data/in/tables/domains_train.csv` - Contains domains with the 'domain', 'description', and 'category' columns for training
 
 #### Output Tables:
 - `/data/out/tables/url_level_predictions.csv` - URL-level predictions on the training data
-- `/data/out/tables/domain_level_predictions.csv` - Domain-level aggregated predictions
+- `/data/out/tables/data_domains_predictions.csv` - Domain-level aggregated predictions
 - `/data/out/tables/key_metrics.csv` - Evaluation metrics (recall, accuracy, etc.)
-- `/data/out/tables/domains_predictions.csv` - Predictions for all domains with descriptions
 - `/data/out/tables/domains_predictions_summary.csv` - Summary of predictions by category
 
 #### Output Files:
@@ -35,7 +59,7 @@ There are two main scripts:
 ### For Prediction (predict_keboola.py)
 
 #### Input Tables:
-- `/data/in/tables/domains.csv` - Contains domains with the 'domain' and 'description' columns
+- `/data/in/tables/data_domains_classification.csv` - Contains domains with the 'domain' and 'description' columns
 
 #### Input Files:
 - `/data/in/files/best_classifier_model.joblib` - The trained classifier model
@@ -43,7 +67,7 @@ There are two main scripts:
 
 #### Output Tables:
 - `/data/out/tables/url_level_predictions.csv` - URL-level predictions
-- `/data/out/tables/domain_level_predictions.csv` - Domain-level aggregated predictions
+- `/data/out/tables/data_domains_predictions.csv` - Domain-level aggregated predictions
 - `/data/out/tables/domains_predictions_summary.csv` - Summary of predictions by category
 
 #### Output Files:
@@ -56,8 +80,7 @@ There are two main scripts:
 1. Create a Keboola component with Python 3.7+
 2. Upload the `train_best_model_keboola.py` script
 3. Configure input mappings:
-   - Map your domain data to `/data/in/tables/domains.csv`
-   - Map your domain category mappings to `/data/in/tables/keyword-analysis-mapping.csv`
+   - Map your domain training data to `/data/in/tables/domains_train.csv`
 4. Configure output mappings:
    - Map all files in `/data/out/files/` to your storage
    - Map all tables in `/data/out/tables/` to your storage
@@ -67,7 +90,7 @@ There are two main scripts:
 1. Create a Keboola component with Python 3.7+
 2. Upload the `predict_keboola.py` script
 3. Configure input mappings:
-   - Map your new domain data to `/data/in/tables/domains.csv`
+   - Map your new domain data to `/data/in/tables/data_domains_classification.csv`
    - Map the previously saved model files to `/data/in/files/`
 4. Configure output mappings:
    - Map all tables in `/data/out/tables/` to your storage
