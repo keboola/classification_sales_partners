@@ -15,7 +15,7 @@ import json
 import logging
 import sys
 from xgboost import XGBClassifier
-import umap
+from sklearn.decomposition import PCA
 from collections import Counter
 from sklearn.preprocessing import LabelEncoder
 import shutil
@@ -25,8 +25,8 @@ import shutil
 # Embedding model
 MODEL_NAME_TRANSFORMER = 'all-MiniLM-L6-v2'
 
-# UMAP
-N_COMPONENTS_UMAP = 100
+# PCA
+N_COMPONENTS_PCA = 20
 
 # Random Forest
 RANDOM_FOREST_PARAMS = {
@@ -54,56 +54,53 @@ LOGISTIC_REGRESSION_PARAMS = {
 
 # Configurations to test
 MODEL_TYPES = ['rf', 'xgb', 'lr']  # Random Forest, XGBoost, Logistic Regression
-USE_UMAP = [True, False]
+USE_PCA = [True, False]
 USE_SMOTE = [True, False]
 USE_CLASS_WEIGHTS = [True, False]
 
-# Only testing combinations with UMAP=True to avoid too many models
+# Only testing combinations with PCA=True to avoid too many models
 MODEL_CONFIGS = [
-    # With UMAP
-    {"model_type": "rf", "use_umap": True, "use_smote": False, "use_class_weights": False},
-    {"model_type": "rf", "use_umap": True, "use_smote": True, "use_class_weights": False},
-    {"model_type": "rf", "use_umap": True, "use_smote": False, "use_class_weights": True},
-    {"model_type": "rf", "use_umap": True, "use_smote": True, "use_class_weights": True},
-    {"model_type": "xgb", "use_umap": True, "use_smote": False, "use_class_weights": False},
-    {"model_type": "xgb", "use_umap": True, "use_smote": True, "use_class_weights": False},
-    {"model_type": "xgb", "use_umap": True, "use_smote": False, "use_class_weights": True},
-    {"model_type": "xgb", "use_umap": True, "use_smote": True, "use_class_weights": True},
-    {"model_type": "lr", "use_umap": True, "use_smote": False, "use_class_weights": False},
-    {"model_type": "lr", "use_umap": True, "use_smote": True, "use_class_weights": False},
-    {"model_type": "lr", "use_umap": True, "use_smote": False, "use_class_weights": True},
-    {"model_type": "lr", "use_umap": True, "use_smote": True, "use_class_weights": True},
+    # With PCA
+    {"model_type": "rf", "use_pca": True, "use_smote": False, "use_class_weights": False},
+    {"model_type": "rf", "use_pca": True, "use_smote": True, "use_class_weights": False},
+    {"model_type": "rf", "use_pca": True, "use_smote": False, "use_class_weights": True},
+    {"model_type": "xgb", "use_pca": True, "use_smote": False, "use_class_weights": False},
+    {"model_type": "xgb", "use_pca": True, "use_smote": True, "use_class_weights": False},
+    {"model_type": "xgb", "use_pca": True, "use_smote": False, "use_class_weights": True},
+    {"model_type": "lr", "use_pca": True, "use_smote": False, "use_class_weights": False},
+    {"model_type": "lr", "use_pca": True, "use_smote": True, "use_class_weights": False},
+    {"model_type": "lr", "use_pca": True, "use_smote": False, "use_class_weights": True},
 
-    # Without UMAP - All combinations
-    {"model_type": "rf", "use_umap": False, "use_smote": False, "use_class_weights": False},
-    {"model_type": "rf", "use_umap": False, "use_smote": True, "use_class_weights": False},
-    {"model_type": "rf", "use_umap": False, "use_smote": False, "use_class_weights": True},
-    {"model_type": "rf", "use_umap": False, "use_smote": True, "use_class_weights": True},
-    {"model_type": "xgb", "use_umap": False, "use_smote": False, "use_class_weights": False},
-    {"model_type": "xgb", "use_umap": False, "use_smote": True, "use_class_weights": False},
-    {"model_type": "xgb", "use_umap": False, "use_smote": False, "use_class_weights": True},
-    {"model_type": "xgb", "use_umap": False, "use_smote": True, "use_class_weights": True},
-    {"model_type": "lr", "use_umap": False, "use_smote": False, "use_class_weights": False},
-    {"model_type": "lr", "use_umap": False, "use_smote": True, "use_class_weights": False},
-    {"model_type": "lr", "use_umap": False, "use_smote": False, "use_class_weights": True},
-    {"model_type": "lr", "use_umap": False, "use_smote": True, "use_class_weights": True},
+    # Without PCA - All combinations
+    {"model_type": "rf", "use_pca": False, "use_smote": False, "use_class_weights": False},
+    {"model_type": "rf", "use_pca": False, "use_smote": True, "use_class_weights": False},
+    {"model_type": "rf", "use_pca": False, "use_smote": False, "use_class_weights": True},
+    {"model_type": "xgb", "use_pca": False, "use_smote": False, "use_class_weights": False},
+    {"model_type": "xgb", "use_pca": False, "use_smote": True, "use_class_weights": False},
+    {"model_type": "xgb", "use_pca": False, "use_smote": False, "use_class_weights": True},
+    {"model_type": "lr", "use_pca": False, "use_smote": False, "use_class_weights": False},
+    {"model_type": "lr", "use_pca": False, "use_smote": True, "use_class_weights": False},
+    {"model_type": "lr", "use_pca": False, "use_smote": False, "use_class_weights": True},
 ]
+
+# Set the results output directory here. Change this variable to switch output folders easily.
+RESULTS_DIR = 'results_round4'
 
 
 def setup_directories():
     """Create necessary output directories and clean existing results"""
     # Define all directories
     directories = [
-        'results', 
+        RESULTS_DIR, 
         'embeddings', 
         'models',
-        'results/URLs',
-        'results/Domains',
-        'results/output_predictions'
+        f'{RESULTS_DIR}/URLs',
+        f'{RESULTS_DIR}/Domains',
+        f'{RESULTS_DIR}/output_predictions'
     ]
     
     # Clean results directories if they exist
-    results_dirs = [d for d in directories if d.startswith('results')]
+    results_dirs = [d for d in directories if d.startswith(RESULTS_DIR)]
     for directory in results_dirs:
         if os.path.exists(directory):
             # Delete all files in the directory but keep the directory itself
@@ -122,27 +119,28 @@ def setup_directories():
         os.makedirs(directory, exist_ok=True)
 
 
-def load_data(data_path):
-    """Load and prepare the initial datasets"""
+def load_and_prepare_data(data_path):
+    """
+    Load all required CSV files and prepare the merged training DataFrame.
+    Returns the prepared DataFrame and the original targets DataFrame (for later use).
+    """
+    # Load data
     data_targets_name = 'keyword analysis - mapping.csv'
     data_features_name = 'keyword analysis - domain ad info.csv'
     data_texts_name = 'domains.csv'
+    data_verification_name = 'domains_verification.csv'
 
     targets = pd.read_csv(os.path.join(data_path, data_targets_name))
     features = pd.read_csv(os.path.join(data_path, data_features_name))
     texts = pd.read_csv(os.path.join(data_path, data_texts_name))
-    
-    return targets, features, texts
+    new_data = pd.read_csv(os.path.join(data_path, data_verification_name))
 
-
-def prepare_data(texts, targets):
-    """Prepare and merge the data for training"""
     # Filter texts with non-null and non-empty descriptions
     texts = texts[texts['description'].notna() & (texts['description'] != '')]
-    
+
     # Merge and prepare training data
     train_data = pd.merge(texts, targets, on='domain', how='right')
-    train_data['category'] = np.where(
+    train_data['category_original'] = np.where(
         train_data['category_x'].isna(),
         train_data['category_y'],
         train_data['category_x']
@@ -153,7 +151,26 @@ def prepare_data(texts, targets):
     train_data = train_data.dropna(subset=['description'])
     train_data = train_data[train_data['description'] != '']
 
-    return train_data
+    joined_data = pd.merge(train_data, new_data, on='domain', how='outer')
+    # Create the 'category' column: use "Matěj's verification" if not null, otherwise use 'category_original'
+    joined_data['category'] = np.where(
+        joined_data["Matěj's verification"].notna(),
+        joined_data["Matěj's verification"],
+        joined_data['category_original']
+    )
+
+    joined_data = joined_data[joined_data["description"].notna() & joined_data['category'].notna()]
+    joined_data = joined_data[["domain", "url", "description", "Matěj's verification", "category"]]
+
+    # Map categories to only four: 'competition', 'partner', 'partner-seo', 'other'
+    allowed_categories = {"competition", "partner", "partner-seo"}
+    joined_data["category"] = joined_data["category"].apply(
+        lambda x: x if x in allowed_categories else "other"
+    )
+    # Optionally, ensure category is a string (in case of NaN or other types)
+    joined_data["category"] = joined_data["category"].astype(str)
+
+    return joined_data, targets
 
 
 def split_data(train_data):
@@ -189,35 +206,39 @@ def create_embeddings(X_train, X_test):
 
 def save_confusion_matrix(y_true, y_pred, title, filename):
     """Create and save both regular and normalized confusion matrices"""
+    # Define all expected categories to ensure 4x4 confusion matrix
+    # expected_categories = sorted(pd.Series(y_true).unique())
+    expected_categories = ['competition', 'partner', 'partner-seo', 'other']
+    
     # Regular confusion matrix
     plt.figure(figsize=(12, 8))
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=expected_categories)
     sns.heatmap(
         cm, 
         annot=True, 
         fmt='d', 
         cmap='Blues',
-        xticklabels=sorted(pd.Series(y_true).unique()),
-        yticklabels=sorted(pd.Series(y_true).unique())
+        xticklabels=expected_categories,
+        yticklabels=expected_categories
     )
     plt.title(f'{title}')
     plt.ylabel('True Category')
     plt.xlabel('Predicted Category')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-    plt.savefig(f'results/URLs/{filename}.png')
+    plt.savefig(f'{RESULTS_DIR}/URLs/{filename}.png')
     plt.close()
 
     # Normalized confusion matrix
     plt.figure(figsize=(12, 8))
-    cm_normalized = confusion_matrix(y_true, y_pred, normalize='true')
+    cm_normalized = confusion_matrix(y_true, y_pred, labels=expected_categories, normalize='true')
     sns.heatmap(
         cm_normalized, 
         annot=True, 
         fmt='.2f', 
         cmap='Blues',
-        xticklabels=sorted(pd.Series(y_true).unique()),
-        yticklabels=sorted(pd.Series(y_true).unique())
+        xticklabels=expected_categories,
+        yticklabels=expected_categories
     )
 
     plt.title(f'Normalized {title}')
@@ -225,7 +246,7 @@ def save_confusion_matrix(y_true, y_pred, title, filename):
     plt.xlabel('Predicted Category')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-    plt.savefig(f'results/URLs/{filename}_normalized.png')
+    plt.savefig(f'{RESULTS_DIR}/URLs/{filename}_normalized.png')
     plt.close()
 
 
@@ -379,7 +400,7 @@ def rank_models_by_domain_confusion_matrices():
     logging.info("Ranking models based on domain confusion matrices...")
     
     # Get all domain prediction CSV files
-    prediction_files = [f for f in os.listdir('results/output_predictions') if f.endswith('_domain.csv')]
+    prediction_files = [f for f in os.listdir(f'{RESULTS_DIR}/output_predictions') if f.endswith('_domain.csv')]
     
     model_metrics = []
     
@@ -388,7 +409,7 @@ def rank_models_by_domain_confusion_matrices():
         prefix = file.replace('prediction_', '').replace('_domain.csv', '')
         
         # Load predictions
-        df = pd.read_csv(f'results/output_predictions/{file}')
+        df = pd.read_csv(f'{RESULTS_DIR}/output_predictions/{file}')
         
         # Calculate metrics focused on partner and partner-seo classes
         metrics = {}
@@ -469,7 +490,7 @@ def rank_models_by_domain_confusion_matrices():
     metrics_df = metrics_df.sort_values('weighted_score', ascending=False).reset_index(drop=True)
     
     # Save to CSV
-    metrics_df.to_csv('results/model_rankings.csv', index=False)
+    metrics_df.to_csv(f'{RESULTS_DIR}/model_rankings.csv', index=False)
     
     # Log results
     logging.info("Model rankings based on minimizing false negatives for partner classes:")
@@ -483,35 +504,38 @@ def save_domain_confusion_matrix(domain_df, title, prefix):
     y_true = domain_df['true_category']
     y_pred = domain_df['predicted_category']
     
+    # Define all expected categories to ensure 4x4 confusion matrix
+    expected_categories = ['competition', 'partner', 'partner-seo', 'other']
+    
     # Regular confusion matrix
     plt.figure(figsize=(12, 8))
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=expected_categories)
     sns.heatmap(
         cm, 
         annot=True, 
         fmt='d', 
         cmap='Blues',
-        xticklabels=sorted(pd.Series(y_true).unique()),
-        yticklabels=sorted(pd.Series(y_true).unique())
+        xticklabels=expected_categories,
+        yticklabels=expected_categories
     )
     plt.title(f'{title} (Domain Level)')
     plt.ylabel('True Category')
     plt.xlabel('Predicted Category')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-    plt.savefig(f'results/Domains/confusion_matrix_{prefix}_test.png')
+    plt.savefig(f'{RESULTS_DIR}/Domains/confusion_matrix_{prefix}_test.png')
     plt.close()
 
     # Normalized confusion matrix
     plt.figure(figsize=(12, 8))
-    cm_normalized = confusion_matrix(y_true, y_pred, normalize='true')
+    cm_normalized = confusion_matrix(y_true, y_pred, labels=expected_categories, normalize='true')
     sns.heatmap(
         cm_normalized, 
         annot=True, 
         fmt='.2f', 
         cmap='Blues',
-        xticklabels=sorted(pd.Series(y_true).unique()),
-        yticklabels=sorted(pd.Series(y_true).unique())
+        xticklabels=expected_categories,
+        yticklabels=expected_categories
     )
 
     plt.title(f'Normalized {title} (Domain Level)')
@@ -519,11 +543,11 @@ def save_domain_confusion_matrix(domain_df, title, prefix):
     plt.xlabel('Predicted Category')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-    plt.savefig(f'results/Domains/confusion_matrix_{prefix}_test_normalized.png')
+    plt.savefig(f'{RESULTS_DIR}/Domains/confusion_matrix_{prefix}_test_normalized.png')
     plt.close()
     
     # Save domain aggregation results to CSV with new naming convention
-    domain_df.to_csv(f'results/output_predictions/prediction_{prefix}_domain.csv', index=False)
+    domain_df.to_csv(f'{RESULTS_DIR}/output_predictions/prediction_{prefix}_domain.csv', index=False)
 
 
 def evaluate_model(clf, X_test, y_test, domains, config, targets_df):
@@ -537,7 +561,7 @@ def evaluate_model(clf, X_test, y_test, domains, config, targets_df):
         y_pred = clf.predict(X_test)
     
     # Generate prefix based on the configuration
-    prefix = f"{config['model_type']}_{'umap_' if config['use_umap'] else ''}{'smote_' if config['use_smote'] else ''}{'weights' if config['use_class_weights'] else 'base'}"
+    prefix = f"{config['model_type']}_{'pca_' if config['use_pca'] else ''}{'smote_' if config['use_smote'] else ''}{'weights' if config['use_class_weights'] else 'base'}"
     
     # Save URL-level results
     url_results_df = pd.DataFrame({
@@ -545,7 +569,7 @@ def evaluate_model(clf, X_test, y_test, domains, config, targets_df):
         'true_category': y_test,
         'predicted_category': y_pred
     })
-    url_results_df.to_csv(f'results/output_predictions/prediction_{prefix}_url.csv', index=False)
+    url_results_df.to_csv(f'{RESULTS_DIR}/output_predictions/prediction_{prefix}_url.csv', index=False)
     
     # Save URL-level confusion matrix
     save_confusion_matrix(
@@ -614,7 +638,7 @@ def save_training_artifacts(X_train, X_test, y_train, y_test, embedding_model):
 
 def log_results(classifiers_dict, train_data):
     """Log model parameters and dataset statistics"""
-    with open('results/experiment_log.txt', 'w') as f:
+    with open(f'{RESULTS_DIR}/experiment_log.txt', 'w') as f:
         f.write("=== Dataset Statistics ===\n")
         f.write(f"Total samples: {len(train_data)}\n")
         f.write(f"Category distribution:\n{train_data['category'].value_counts().to_string()}\n\n")
@@ -631,11 +655,14 @@ def log_results(classifiers_dict, train_data):
 
 def setup_logging():
     """Setup logging configuration"""
+    # Ensure the results directory exists before setting up logging
+    if not os.path.exists(RESULTS_DIR):
+        os.makedirs(RESULTS_DIR, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler('results/training.log'),
+            logging.FileHandler(f'{RESULTS_DIR}/training.log'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -655,18 +682,19 @@ def validate_data(texts: pd.DataFrame, targets: pd.DataFrame) -> None:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
 
-def reduce_dimensions_with_umap(X_train_embeddings, X_test_embeddings, n_components=100):
-    """Reduce dimensionality of embeddings using UMAP"""
-    logging.info(f"Reducing dimensionality with UMAP to {n_components} components...")
+def reduce_dimensions_with_pca(X_train_embeddings, X_test_embeddings, n_components=100):
+    """Reduce dimensionality of embeddings using PCA"""
+    logging.info(f"Reducing dimensionality with PCA to {n_components} components...")
     
-    # Initialize and fit UMAP on training data
-    reducer = umap.UMAP(n_components=n_components, random_state=42)
+    # Initialize and fit PCA on training data
+    reducer = PCA(n_components=n_components, random_state=42)
     X_train_reduced = reducer.fit_transform(X_train_embeddings)
     
-    # Transform test data using the fitted UMAP
+    # Transform test data using the fitted PCA
     X_test_reduced = reducer.transform(X_test_embeddings)
     
     logging.info(f"Reduced embedding dimensions from {X_train_embeddings.shape[1]} to {n_components}")
+    logging.info(f"Explained variance ratio: {sum(reducer.explained_variance_ratio_):.4f}")
     
     return reducer, X_train_reduced, X_test_reduced
 
@@ -682,12 +710,10 @@ def main():
         plt.rcParams['figure.figsize'] = (12, 8)
         setup_directories()
         
-        # Load and prepare data
-        logging.info("Loading data...")
-        targets, features, texts = load_data("data")
-        validate_data(texts, targets)
-        
-        train_data = prepare_data(texts, targets)
+        # Load and prepare data (now combined)
+        logging.info("Loading and preparing data...")
+        train_data, targets = load_and_prepare_data("data")
+        validate_data(train_data, targets)
         logging.info(f"Prepared data shape: {train_data.shape}")
         
         # Split data
@@ -704,17 +730,17 @@ def main():
         np.save('embeddings/train_embeddings_original.npy', X_train_embeddings)
         np.save('embeddings/test_embeddings_original.npy', X_test_embeddings)
         
-        # Reduce dimensionality with UMAP
-        umap_reducer, X_train_reduced, X_test_reduced = reduce_dimensions_with_umap(
-            X_train_embeddings, X_test_embeddings, n_components=N_COMPONENTS_UMAP
+        # Reduce dimensionality with PCA
+        pca_reducer, X_train_reduced, X_test_reduced = reduce_dimensions_with_pca(
+            X_train_embeddings, X_test_embeddings, n_components=N_COMPONENTS_PCA
         )
         
-        # Save UMAP embeddings
-        np.save('embeddings/train_embeddings_umap.npy', X_train_reduced)
-        np.save('embeddings/test_embeddings_umap.npy', X_test_reduced)
+        # Save PCA embeddings
+        np.save('embeddings/train_embeddings_pca.npy', X_train_reduced)
+        np.save('embeddings/test_embeddings_pca.npy', X_test_reduced)
 
-        # Save the UMAP reducer
-        joblib.dump(umap_reducer, 'models/umap_reducer.joblib')
+        # Save the PCA reducer
+        joblib.dump(pca_reducer, 'models/pca_reducer.joblib')
         
         # Dictionary to store all classifiers
         classifiers = {}
@@ -722,20 +748,20 @@ def main():
         # Train and evaluate all models
         for config in MODEL_CONFIGS:
             model_type = config["model_type"]
-            use_umap = config["use_umap"]
+            use_pca = config["use_pca"]
             use_smote = config["use_smote"]
             use_class_weights = config["use_class_weights"]
             
             config_desc = (f"{model_type.upper()} model "
-                         f"{'with' if use_umap else 'without'} UMAP, "
+                         f"{'with' if use_pca else 'without'} PCA, "
                          f"{'with' if use_smote else 'without'} SMOTE, "
                          f"{'with' if use_class_weights else 'without'} class weights")
             
             logging.info(f"\n=== Training {config_desc} ===")
             
             # Select appropriate embeddings
-            X_train_emb = X_train_reduced if use_umap else X_train_embeddings
-            X_test_emb = X_test_reduced if use_umap else X_test_embeddings
+            X_train_emb = X_train_reduced if use_pca else X_train_embeddings
+            X_test_emb = X_test_reduced if use_pca else X_test_embeddings
             
             # Train and evaluate model
             clf, y_pred, prefix = train_and_evaluate_model(
